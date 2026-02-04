@@ -16,6 +16,7 @@
  */
 package alfio.controller.api.v2.user;
 
+import alfio.controller.api.v2.DynamicDiscountMessageService;
 import alfio.controller.api.v2.model.EventWithAdditionalInfo;
 import alfio.controller.api.v2.model.*;
 import alfio.controller.api.v2.user.support.EventLoader;
@@ -82,6 +83,7 @@ public class EventApiV2Controller {
     private final EventLoader eventLoader;
     private final ExtensionManager extensionManager;
     private final AdditionalServiceManager additionalServiceManager;
+    private final DynamicDiscountMessageService dynamicDiscountMessageService;
 
     public EventApiV2Controller(EventManager eventManager,
                                 EventRepository eventRepository,
@@ -98,7 +100,8 @@ public class EventApiV2Controller {
                                 PromoCodeRequestManager promoCodeRequestManager,
                                 EventLoader eventLoader,
                                 ExtensionManager extensionManager,
-                                AdditionalServiceManager additionalServiceManager) {
+                                AdditionalServiceManager additionalServiceManager,
+                                DynamicDiscountMessageService dynamicDiscountMessageService) {
         this.eventManager = eventManager;
         this.eventRepository = eventRepository;
         this.configurationManager = configurationManager;
@@ -115,6 +118,7 @@ public class EventApiV2Controller {
         this.eventLoader = eventLoader;
         this.extensionManager = extensionManager;
         this.additionalServiceManager = additionalServiceManager;
+        this.dynamicDiscountMessageService = dynamicDiscountMessageService;
     }
 
 
@@ -300,7 +304,8 @@ public class EventApiV2Controller {
                         } else {
                             formattedDiscount = MonetaryUtil.formatCents(d.getDiscountAmount(), event.getCurrency());
                         }
-                        return new DynamicDiscount(formattedDiscount, d.getDiscountType(), formatDynamicCodeMessage(event, d));
+                        return new DynamicDiscount(formattedDiscount, d.getDiscountType(),
+                            dynamicDiscountMessageService.formatDynamicCodeMessage(event, d));
                     });
             })
             .filter(d -> d.getDiscountType() != PromoCodeDiscount.DiscountType.NONE)
@@ -344,35 +349,4 @@ public class EventApiV2Controller {
         return eventLoader.isRecaptchaForTicketSelectionEnabled(configurationValues)
             && !recaptchaService.checkRecaptcha(recaptchaResponse, request);
     }
-
-    private Map<String, String> formatDynamicCodeMessage(Event event, PromoCodeDiscount promoCodeDiscount) {
-        Validate.isTrue(promoCodeDiscount != null && promoCodeDiscount.getDiscountType() != PromoCodeDiscount.DiscountType.NONE);
-        var messageSource = messageSourceManager.getMessageSourceFor(event);
-        Map<String, String> res = new HashMap<>();
-        String code;
-        String amount;
-        switch(promoCodeDiscount.getDiscountType()) {
-            case PERCENTAGE:
-                code = "reservation.dynamic.discount.confirmation.percentage.message";
-                amount = String.valueOf(promoCodeDiscount.getDiscountAmount());
-                break;
-            case FIXED_AMOUNT:
-                amount = event.getCurrency() + " " + MonetaryUtil.formatCents(promoCodeDiscount.getDiscountAmount(), event.getCurrency());
-                code = "reservation.dynamic.discount.confirmation.fix-per-ticket.message";
-                break;
-            case FIXED_AMOUNT_RESERVATION:
-                amount = event.getCurrency() + " " + MonetaryUtil.formatCents(promoCodeDiscount.getDiscountAmount(), event.getCurrency());
-                code = "reservation.dynamic.discount.confirmation.fix-per-reservation.message";
-                break;
-            default:
-                throw new IllegalStateException("Unexpected discount code type");
-        }
-
-        for (ContentLanguage cl : event.getContentLanguages()) {
-            res.put(cl.locale().getLanguage(), messageSource.getMessage(code, new Object[]{amount}, cl.locale()));
-        }
-        return res;
-    }
-
-
 }
