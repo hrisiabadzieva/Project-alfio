@@ -251,3 +251,94 @@ Support this project with your organization. Your logo will show up here with a 
 <a href="https://opencollective.com/alfio/organization/1/website"><img src="https://images.opencollective.com/salesforce/ca8f997/logo/256.png" height="100"></a> &nbsp;
 <a href="https://opencollective.com/alfio/organization/2/website"><img src="https://opencollective.com/alfio/organization/2/avatar.svg"></a>
 
+## Refactoring and Architectural Improvements
+
+As part of this course project, a series of refactorings and architectural improvements were implemented with 
+the main goal of improving code quality, maintainability, and adherence to SOLID principles, while ensuring that 
+the project continues to build successfully.
+
+### Dynamic Discount Message Refactor (SRP)
+
+The first step focused on applying the Single Responsibility Principle (SRP) in the REST layer. Previously, the 
+logic responsible for formatting dynamic discount messages was implemented directly inside `EventApiV2Controller`, 
+using a switch-based structure. This caused the controller to mix request handling with business and formatting logic.
+
+To address this, the formatting logic was extracted into a dedicated service named `DynamicDiscountMessageService`. 
+The controller now delegates this responsibility to the service, resulting in a thinner controller with a clearer role. 
+This refactor significantly improves readability, testability, and long-term maintainability.
+
+The project was successfully compiled using Gradle (`testClasses`), confirming that this refactor did not break the build.
+
+---
+
+### StripeWebhookPaymentManager Refactor (SRP, OCP, DIP)
+
+In the initial implementation of `StripeWebhookPaymentManager`, the handling of different Stripe webhook 
+events was implemented through a large `switch` statement based on the event type. This approach led to several design issues:
+
+- Violation of the Single Responsibility Principle (SRP), as the class both managed webhook orchestration and contained 
+business logic for each event type.
+- Violation of the Open/Closed Principle (OCP), since adding a new webhook type required modifying the existing switch statement.
+- Strong coupling between the control flow and concrete event types.
+
+#### Implemented Solution
+
+The logic from the switch construct was extracted into separate handlers, each responsible for processing a single 
+webhook event type (e.g. `created`, `succeeded`, `failed`). A dispatch mechanism was introduced using a `Map<String, Handler>`, 
+allowing the appropriate handler to be selected dynamically based on the webhook event type.
+
+The main manager class now has a clearly defined role:
+- validating input data,
+- extracting the required context,
+- delegating processing to the appropriate handler.
+
+As a result, new webhook types can be added by introducing new handlers, without modifying existing logic.
+
+The same approach was consistently applied to both:
+- `StripeWebhookPaymentManager`
+- `MollieWebhookPaymentManager`
+
+---
+
+### Liskov Substitution Principle (LSP) Fix
+
+An additional design issue was identified in `PurchaseContextSearchManager`. Some methods accepted the base 
+type `PurchaseContext` but threw `UnsupportedOperationException` for specific subtypes (e.g. subscriptions). 
+This violated the Liskov Substitution Principle, as subtypes could not safely replace the base type.
+
+The solution was to replace runtime exceptions with valid, neutral return values such as empty collections or default pairs. 
+This ensures that all subtypes are handled consistently and eliminates unexpected runtime crashes.
+
+---
+
+### NotificationManager Refactor (Major Cleanup)
+
+At the start of the project, `NotificationManager` was a large, monolithic class with excessive responsibilities. 
+It handled email sending, attachment generation (ICS, PDFs), template selection, and direct knowledge of Stripe, PassKit, 
+and other subsystems. The constructor contained over 20 dependencies, static helpers were used internally, and the 
+class was extremely difficult to test or modify safely.
+
+#### Refactoring Steps
+
+Attachment generation logic was extracted into a dedicated `AttachmentGenerator` abstraction, with concrete implementations 
+such as `IcsAttachmentGenerator`. The generators were injected via dependency injection as a collection and organized into a 
+map keyed by attachment type. This removed the need for large conditional blocks and static helpers.
+
+The constructor of `NotificationManager` was simplified to include only its true orchestration dependencies. 
+All low-level responsibilities were moved into their respective classes. As a result, `NotificationManager` now acts 
+purely as an orchestration component, coordinating email sending and attachment selection without generating content itself.
+
+---
+
+### Stripe SDK Decoupling (DIP)
+
+Another major issue was the tight coupling between Stripe-related classes and the Stripe SDK. Webhook parsing and 
+verification were performed directly inside core classes, making tests fragile and highly dependent on external libraries.
+
+To address this, a new abstraction was introduced:
+
+```java
+interface StripeWebhookEventParser {
+    StripeWebhookEvent parseAndVerify(...);
+}
+
