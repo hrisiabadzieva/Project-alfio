@@ -56,7 +56,8 @@ public class StripeCreditCardManagerTest {
         configurationManager = mock(ConfigurationManager.class);
         TicketRepository ticketRepository = mock(TicketRepository.class);
         event = mock(Event.class);
-        baseStripeManager = new BaseStripeManager(configurationManager, null, ticketRepository,  null);
+        StripeWebhookEventParser webhookEventParser = null;
+        baseStripeManager = new BaseStripeManager(configurationManager, null, ticketRepository,  null, webhookEventParser );
         stripeCreditCardManager = new StripeCreditCardManager(null, baseStripeManager, TestUtil.clockProvider());
     }
 
@@ -91,7 +92,7 @@ public class StripeCreditCardManagerTest {
             .thenReturn(new ConfigurationManager.MaybeConfiguration(PLATFORM_MODE_ENABLED, new ConfigurationKeyValuePathLevel(null, "true", null)));
         when(configurationManager.getFor(eq(STRIPE_CONNECTED_ID), any())).thenReturn(new ConfigurationManager.MaybeConfiguration(STRIPE_CONNECTED_ID));
         Optional<RequestOptions> options = baseStripeManager.options(event);
-        Assertions.assertNotNull(options);
+        assertNotNull(options);
         assertFalse(options.isPresent());
     }
 

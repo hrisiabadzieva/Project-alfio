@@ -36,6 +36,7 @@ import com.stripe.net.RequestOptions;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.core.env.Environment;
 
 import java.nio.file.Files;
@@ -67,7 +68,16 @@ class StripeWebhookPaymentManagerTest {
     private AuditingRepository auditingRepository;
     private Environment environment;
     private TicketReservation ticketReservation;
-    private BaseStripeManager baseStripeManager;
+
+    StripeWebhookEventParser webhookEventParser = Mockito.mock(StripeWebhookEventParser.class);
+
+    BaseStripeManager baseStripeManager = new BaseStripeManager(
+        configurationManager,
+        configurationRepository,
+        ticketRepository,
+        environment,
+        webhookEventParser
+    );
 
     private static final String SK_LIVE = "sk_live_";
     private static final MaybeConfiguration STRIPE_SECRET_KEY_CONF =
@@ -97,7 +107,15 @@ class StripeWebhookPaymentManagerTest {
         baseStripeManager = mock(BaseStripeManager.class);
         when(baseStripeManager.getSecretKey(any())).thenReturn(SK_LIVE);
         when(baseStripeManager.options(any())).thenReturn(Optional.of(RequestOptions.builder().build()));
-        stripeWebhookPaymentManager = new StripeWebhookPaymentManager(configurationManager, ticketRepository, transactionRepository, configurationRepository, ticketReservationRepository, eventRepository, auditingRepository, environment, TestUtil.clockProvider());
+        stripeWebhookPaymentManager = new StripeWebhookPaymentManager(
+            configurationManager,
+            transactionRepository,
+            ticketReservationRepository,
+            eventRepository,
+            auditingRepository,
+            TestUtil.clockProvider(),
+            baseStripeManager
+        );
     }
 
     @Test

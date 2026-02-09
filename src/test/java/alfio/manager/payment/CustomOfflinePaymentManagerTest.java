@@ -104,7 +104,8 @@ class CustomOfflinePaymentManagerTest {
             ticketReservationRepository,
             transactionRepository,
             eventRepository,
-            customOfflineConfigurationManager
+            customOfflineConfigurationManager,
+            new EventEndOfflinePaymentDeadlineResolver()
         );
     }
 

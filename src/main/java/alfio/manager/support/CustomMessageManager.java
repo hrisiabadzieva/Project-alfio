@@ -21,6 +21,7 @@ import alfio.manager.ExtensionManager;
 import alfio.manager.NotificationManager;
 import alfio.manager.TicketReservationManager;
 import alfio.manager.i18n.MessageSourceManager;
+import alfio.manager.notification.OnlineCheckInTextBuilder;
 import alfio.manager.system.ConfigurationManager;
 import alfio.manager.system.Mailer;
 import alfio.model.*;
@@ -133,7 +134,14 @@ public class CustomMessageManager {
                             // generate only calendar invitation, as Ticket PDF would not make sense in this case.
                             attachments.add(generateCalendarAttachmentForOnlineEvent(onlineCheckInModel));
                             // add check-in URL and prerequisites, if any
-                            text.append(notificationManager.buildOnlineCheckInText(onlineCheckInModel, Locale.forLanguageTag(ticket.getUserLanguage()), messageSource));
+                            text.append(
+                                OnlineCheckInTextBuilder.build(
+                                    messageSource,
+                                    onlineCheckInModel,
+                                    Locale.forLanguageTag(ticket.getUserLanguage())
+                                )
+                            );
+
                             templateModel.putAll(onlineCheckInModel);
                         } else if(optionalReservation.isPresent() && optionalTicketCategory.isPresent()) {
                             boolean htmlEmailsEnabled = configuration.get(ConfigurationKeys.ENABLE_HTML_EMAILS).getValueAsBooleanOrDefault();

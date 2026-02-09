@@ -50,6 +50,7 @@ public class StripeConnectManager implements OAuthPaymentProviderConnector {
     private final ExtensionManager extensionManager;
     private final ConfigurationManager configurationManager;
     private final BaseStripeManager baseStripeManager;
+    private final StripeWebhookEventParser webhookEventParser = new StripeSdkWebhookEventParser();
 
     public StripeConnectManager(ExtensionManager extensionManager,
                                 ConfigurationManager configurationManager,
@@ -58,7 +59,7 @@ public class StripeConnectManager implements OAuthPaymentProviderConnector {
                                 Environment environment) {
         this.extensionManager = extensionManager;
         this.configurationManager = configurationManager;
-        this.baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, environment);
+        this.baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, environment, webhookEventParser);
     }
 
     @Override

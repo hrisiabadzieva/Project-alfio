@@ -65,6 +65,17 @@ import static java.util.Objects.requireNonNull;
 @Transactional
 public class StripeWebhookPaymentManager implements PaymentProvider, RefundRequest, PaymentInfo, WebhookHandler, ClientServerTokenRequest, ServerInitiatedTransaction {
 
+    @FunctionalInterface
+    private interface StripeWebhookHandler {
+        PaymentWebhookResult handle(TransactionWebhookPayload payload,
+                                    Transaction transaction,
+                                    PaymentContext paymentContext,
+                                    TicketReservation reservation,
+                                    PurchaseContext purchaseContext,
+                                    PaymentIntent paymentIntent);
+    }
+
+
     private static final Logger log = LoggerFactory.getLogger(StripeWebhookPaymentManager.class);
     private static final String STRIPE_MANAGER = StripeWebhookPaymentManager.class.getName();
     static final String CLIENT_SECRET_METADATA = "clientSecret";
@@ -82,27 +93,9 @@ public class StripeWebhookPaymentManager implements PaymentProvider, RefundReque
     private final ClockProvider clockProvider;
     private final List<String> interestingEventTypes = List.of(PAYMENT_INTENT_SUCCEEDED, PAYMENT_INTENT_PAYMENT_FAILED, PAYMENT_INTENT_CREATED);
     private final Set<String> cancellableStatuses = Set.of(REQUIRES_PAYMENT_METHOD, "requires_confirmation", "requires_action");
+    private final Map<String, StripeWebhookHandler> handlers = new HashMap<>();
 
-    @Autowired
     public StripeWebhookPaymentManager(ConfigurationManager configurationManager,
-                                       TicketRepository ticketRepository,
-                                       TransactionRepository transactionRepository,
-                                       ConfigurationRepository configurationRepository,
-                                       TicketReservationRepository ticketReservationRepository,
-                                       EventRepository eventRepository,
-                                       AuditingRepository auditingRepository,
-                                       Environment environment,
-                                       ClockProvider clockProvider) {
-        this(configurationManager,
-            transactionRepository,
-            ticketReservationRepository,
-            eventRepository,
-            auditingRepository,
-            clockProvider,
-            new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, environment));
-    }
-
-    StripeWebhookPaymentManager(ConfigurationManager configurationManager,
                                 TransactionRepository transactionRepository,
                                 TicketReservationRepository ticketReservationRepository,
                                 EventRepository eventRepository,
@@ -116,7 +109,61 @@ public class StripeWebhookPaymentManager implements PaymentProvider, RefundReque
         this.auditingRepository = auditingRepository;
         this.baseStripeManager = baseStripeManager;
         this.clockProvider = clockProvider;
+
+        handlers.put(PAYMENT_INTENT_CREATED, this::handlePaymentIntentCreated);
+        handlers.put(PAYMENT_INTENT_SUCCEEDED, this::handlePaymentIntentSucceeded);
+        handlers.put(PAYMENT_INTENT_PAYMENT_FAILED, this::handlePaymentIntentFailed);
     }
+
+    private PaymentWebhookResult handlePaymentIntentCreated(TransactionWebhookPayload payload,
+                                                            Transaction transaction,
+                                                            PaymentContext paymentContext,
+                                                            TicketReservation reservation,
+                                                            PurchaseContext purchaseContext,
+                                                            PaymentIntent paymentIntent) {
+        return PaymentWebhookResult.processStarted(
+            buildTokenFromTransaction(transaction, purchaseContext, false)
+        );
+    }
+
+
+    private PaymentWebhookResult handlePaymentIntentSucceeded(TransactionWebhookPayload payload,
+                                                              Transaction transaction,
+                                                              PaymentContext paymentContext,
+                                                              TicketReservation reservation,
+                                                              PurchaseContext purchaseContext,
+                                                              PaymentIntent paymentIntent) {
+        try {
+            return processSuccessfulPaymentIntent(
+                transaction,
+                paymentIntent,
+                reservation,
+                purchaseContext,
+                baseStripeManager.options(purchaseContext).orElseThrow()
+            );
+        } catch (StripeException e) {
+            return PaymentWebhookResult.error("stripe error: " + e.getMessage());
+        }
+    }
+
+
+
+    private PaymentWebhookResult handlePaymentIntentFailed(
+                                                            TransactionWebhookPayload payload,
+                                                            Transaction transaction,
+                                                            PaymentContext paymentContext,
+                                                            TicketReservation reservation,
+                                                            PurchaseContext purchaseContext,
+                                                            PaymentIntent paymentIntent) {
+
+        return processFailedPaymentIntent(
+            transaction,
+            reservation,
+            purchaseContext
+        );
+
+    }
+
 
     @Override
     public TransactionInitializationToken initTransaction(PaymentSpecification paymentSpecification, Map<String, List<String>> params) {
@@ -311,15 +358,12 @@ public class StripeWebhookPaymentManager implements PaymentProvider, RefundReque
             }
             var reservation = optionalReservation.get();
             var purchaseContext = paymentContext.getPurchaseContext();
-            return switch (payload.getType()) {
-                case PAYMENT_INTENT_CREATED ->
-                    PaymentWebhookResult.processStarted(buildTokenFromTransaction(transaction, purchaseContext, false));
-                case PAYMENT_INTENT_SUCCEEDED ->
-                    processSuccessfulPaymentIntent(transaction, paymentIntent, reservation, purchaseContext, baseStripeManager.options(purchaseContext).orElseThrow());
-                case PAYMENT_INTENT_PAYMENT_FAILED ->
-                    processFailedPaymentIntent(transaction, reservation, purchaseContext);
-                default -> PaymentWebhookResult.notRelevant("event is not relevant");
-            };
+            var handler = handlers.get(payload.getType());
+            if (handler == null) {
+                return PaymentWebhookResult.notRelevant("event is not relevant");
+            }
+            return handler.handle(payload, transaction, paymentContext, reservation, purchaseContext, paymentIntent);
+
 
         } catch (Exception e) {
             log.error("Error while trying to confirm the reservation", e);

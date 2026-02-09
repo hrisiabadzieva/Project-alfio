@@ -58,6 +58,7 @@ public class StripeCreditCardManager implements PaymentProvider, ClientServerTok
     private final TransactionRepository transactionRepository;
     private final BaseStripeManager baseStripeManager;
     private final ClockProvider clockProvider;
+    private final StripeWebhookEventParser webhookEventParser = new StripeSdkWebhookEventParser();
 
     @Autowired
     public StripeCreditCardManager(ConfigurationManager configurationManager,
@@ -65,9 +66,10 @@ public class StripeCreditCardManager implements PaymentProvider, ClientServerTok
                                    TransactionRepository transactionRepository,
                                    ConfigurationRepository configurationRepository,
                                    Environment environment,
-                                   ClockProvider clockProvider) {
+                                   ClockProvider clockProvider,
+                                   StripeWebhookEventParser webhookEventParser) {
         this(transactionRepository,
-            new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, environment),
+            new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, environment, webhookEventParser),
             clockProvider);
     }
 

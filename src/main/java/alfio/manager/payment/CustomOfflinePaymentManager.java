@@ -17,11 +17,7 @@
 package alfio.manager.payment;
 
 import java.time.ZonedDateTime;
-import java.util.Date;
-import java.util.Map;
-import java.util.OptionalInt;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import alfio.manager.payment.custom.offline.CustomOfflineConfigurationManager;
@@ -55,19 +51,22 @@ public class CustomOfflinePaymentManager implements PaymentProvider {
     private final TransactionRepository transactionRepository;
     private final EventRepository eventRepository;
     private final CustomOfflineConfigurationManager customOfflineConfigurationManager;
+    private final OfflinePaymentDeadlineResolver deadlineResolver;
 
     public CustomOfflinePaymentManager(
         ClockProvider clockProvider,
         TicketReservationRepository ticketReservationRepository,
         TransactionRepository transactionRepository,
         EventRepository eventRepository,
-        CustomOfflineConfigurationManager customOfflineConfigurationManager
+        CustomOfflineConfigurationManager customOfflineConfigurationManager,
+        OfflinePaymentDeadlineResolver deadlineResolver
     ) {
         this.clockProvider = clockProvider;
         this.ticketReservationRepository = ticketReservationRepository;
         this.transactionRepository = transactionRepository;
         this.eventRepository = eventRepository;
         this.customOfflineConfigurationManager = customOfflineConfigurationManager;
+        this.deadlineResolver = deadlineResolver;
     }
 
     @Override
@@ -156,49 +155,67 @@ public class CustomOfflinePaymentManager implements PaymentProvider {
         return paymentMethod;
     }
 
+    private void overrideExistingTransactions(PaymentSpecification spec) {
+        PaymentManagerUtils.invalidateExistingTransactions(
+            spec.getReservationId(),
+            transactionRepository
+        );
+
+        transactionRepository.insert(
+            UUID.randomUUID().toString(),
+            null,
+            spec.getReservationId(),
+            ZonedDateTime.now(clockProvider.getClock()),
+            spec.getPriceWithVAT(),
+            spec.getCurrencyCode(),
+            "",
+            PaymentProxy.CUSTOM_OFFLINE.name(),
+            0L,
+            0L,
+            Transaction.Status.PENDING,
+            Map.of(
+                Transaction.SELECTED_PAYMENT_METHOD_KEY,
+                spec.getSelectedPaymentMethod().getPaymentMethodId()
+            )
+        );
+    }
+
+
     @Override
     public boolean isActive(PaymentContext paymentContext) {
-        return
-            paymentContext.getPurchaseContext() != null
+        return paymentContext.getPurchaseContext() != null
             && paymentContext.getPurchaseContext().event().isPresent();
     }
 
+    private void transitionToOfflinePayment(PaymentSpecification spec, ZonedDateTime deadline) {
+        int updatedReservation = ticketReservationRepository.postponePayment(
+            spec.getReservationId(),
+            CUSTOM_OFFLINE_PAYMENT,
+            this.getPaymentProxy().name(),
+            Date.from(deadline.toInstant()),
+            spec.getEmail(),
+            spec.getCustomerName().getFullName(),
+            spec.getCustomerName().getFirstName(),
+            spec.getCustomerName().getLastName(),
+            spec.getBillingAddress(),
+            spec.getCustomerReference()
+        );
+
+        Validate.isTrue(updatedReservation == 1, "expected exactly one updated reservation, got " + updatedReservation);
+    }
+
+
     @Override
     public PaymentResult doPayment(PaymentSpecification spec) {
-        // GET EVENT END TIME AS DEADLINE
-        ZonedDateTime deadline = spec.getPurchaseContext().event().get().getEnd();
+        var deadlineOpt = deadlineResolver.resolveDeadline(spec);
 
-        // POST PONE
-        int updatedReservation = ticketReservationRepository.postponePayment(
-                spec.getReservationId(),
-                CUSTOM_OFFLINE_PAYMENT,
-                this.getPaymentProxy().name(),
-                Date.from(deadline.toInstant()),
-                spec.getEmail(),
-                spec.getCustomerName().getFullName(),
-                spec.getCustomerName().getFirstName(),
-                spec.getCustomerName().getLastName(),
-                spec.getBillingAddress(),
-                spec.getCustomerReference());
-        Validate.isTrue(updatedReservation == 1, "expected exactly one updated reservation, got " + updatedReservation);
+        if (deadlineOpt.isEmpty()) {
+            log.warn("CUSTOM_OFFLINE payment is not supported without an event. reservationId={}", spec.getReservationId());
+            return PaymentResult.failed("custom_offline_not_supported_without_event");
+        }
 
-        // OVERRIDE EXISTING TRANSACTION
-        PaymentManagerUtils.invalidateExistingTransactions(spec.getReservationId(), transactionRepository);
-        transactionRepository.insert(
-                UUID.randomUUID().toString(),
-                null,
-                spec.getReservationId(),
-                ZonedDateTime.now(clockProvider.getClock()),
-                spec.getPriceWithVAT(),
-                spec.getCurrencyCode(),
-                "",
-                PaymentProxy.CUSTOM_OFFLINE.name(),
-                0L,
-                0L,
-                Transaction.Status.PENDING,
-                Map.of(Transaction.SELECTED_PAYMENT_METHOD_KEY, spec.getSelectedPaymentMethod().getPaymentMethodId()));
-
-        // RETURN RESULT
+        transitionToOfflinePayment(spec, deadlineOpt.get());
+        overrideExistingTransactions(spec);
         return PaymentResult.successful(NOT_YET_PAID_TRANSACTION_ID);
     }
 }

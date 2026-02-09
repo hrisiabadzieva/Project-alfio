@@ -41,6 +41,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import jakarta.annotation.PostConstruct;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
@@ -122,6 +123,109 @@ public class MollieWebhookPaymentManager implements PaymentProvider, WebhookHand
     private final MollieConnectManager mollieConnectManager;
     private final ClockProvider clockProvider;
     private final PurchaseContextManager purchaseContextManager;
+    private record MollieWebhookContext(
+        String status,
+        Transaction transaction,
+        String paymentId,
+        PurchaseContext purchaseContext,
+        MolliePaymentDetails body,
+        Map<String, String> transactionMetadata
+    ) {}
+
+    @FunctionalInterface
+    private interface MollieStatusHandler {
+        PaymentWebhookResult handle(MollieWebhookContext ctx);
+    }
+
+    private final Map<String, MollieStatusHandler> statusHandlers = new HashMap<>();
+
+    @PostConstruct
+    void initHandlers() {
+        statusHandlers.put("paid", this::handlePaid);
+        statusHandlers.put(STATUS_FAILED, this::handleFailed);
+        statusHandlers.put("expired", this::handleExpired);
+        statusHandlers.put("canceled", this::handleCanceled);
+        statusHandlers.put("open", this::handleOpen);
+    }
+
+
+    private PaymentWebhookResult handlePaid(MollieWebhookContext ctx) {
+        ctx.transactionMetadata().put("paymentMethod",
+            Objects.requireNonNull(ctx.body().getPaymentMethod()).name()
+        );
+
+        transactionRepository.update(
+            ctx.transaction().getId(),
+            ctx.paymentId(),
+            ctx.paymentId(),
+            ctx.body().getConfirmationTimestamp().orElseThrow(),
+            0L, 0L,
+            Transaction.Status.COMPLETE,
+            ctx.transaction().getMetadata()
+        );
+
+        return PaymentWebhookResult.successful(new MollieToken(ctx.paymentId(), ctx.body().getPaymentMethod()));
+    }
+
+    private PaymentWebhookResult handleFailed(MollieWebhookContext ctx) {
+        ctx.transactionMetadata().put("paymentMethod",
+            Optional.ofNullable(ctx.body().getPaymentMethod()).map(PaymentMethod::name).orElse(null)
+        );
+
+        transactionRepository.update(
+            ctx.transaction().getId(),
+            ctx.paymentId(),
+            ctx.paymentId(),
+            ctx.purchaseContext().now(clockProvider),
+            ctx.transaction().getPlatformFee(),
+            ctx.transaction().getGatewayFee(),
+            ctx.transaction().getStatus(),
+            ctx.transactionMetadata()
+        );
+
+        return PaymentWebhookResult.failed(STATUS_FAILED);
+    }
+
+    private PaymentWebhookResult handleExpired(MollieWebhookContext ctx) {
+        ctx.transactionMetadata().put("paymentMethod",
+            Optional.ofNullable(ctx.body().getPaymentMethod()).map(PaymentMethod::name).orElse(null)
+        );
+
+        transactionRepository.update(
+            ctx.transaction().getId(),
+            ctx.paymentId(),
+            ctx.paymentId(),
+            ctx.purchaseContext().now(clockProvider),
+            ctx.transaction().getPlatformFee(),
+            ctx.transaction().getGatewayFee(),
+            ctx.transaction().getStatus(),
+            ctx.transactionMetadata()
+        );
+
+        return PaymentWebhookResult.cancelled();
+    }
+
+    private PaymentWebhookResult handleCanceled(MollieWebhookContext ctx) {
+        transactionRepository.update(
+            ctx.transaction().getId(),
+            ctx.paymentId(),
+            ctx.paymentId(),
+            ctx.purchaseContext().now(clockProvider),
+            0L, 0L,
+            Transaction.Status.CANCELLED,
+            ctx.transaction().getMetadata()
+        );
+        return PaymentWebhookResult.cancelled();
+    }
+
+    private PaymentWebhookResult handleOpen(MollieWebhookContext ctx) {
+        return PaymentWebhookResult.redirect(ctx.body().getCheckoutLink());
+    }
+
+    private PaymentWebhookResult handleUnknown(MollieWebhookContext ctx) {
+        return PaymentWebhookResult.notRelevant(ctx.status());
+    }
+
 
     private HttpRequest.Builder requestFor(String url, Map<ConfigurationKeys, MaybeConfiguration> configuration, ConfigurationLevel configurationLevel) {
         // check if platform mode is active
@@ -482,28 +586,20 @@ public class MollieWebhookPaymentManager implements PaymentProvider, WebhookHand
             //see statuses: https://www.mollie.com/en/docs/status
 
             var transactionMetadata = transaction.getMetadata();
-            switch (status) {
-                case "paid":
-                    transactionMetadata.put("paymentMethod", Objects.requireNonNull(body.getPaymentMethod()).name());
 
-                    transactionRepository.update(transaction.getId(), paymentId, paymentId, body.getConfirmationTimestamp().orElseThrow(),
-                        0L, 0L, Transaction.Status.COMPLETE, transaction.getMetadata());
-                    return PaymentWebhookResult.successful(new MollieToken(paymentId, body.getPaymentMethod()));
-                case STATUS_FAILED:
-                case "expired":
-                    transactionMetadata.put("paymentMethod", Optional.ofNullable(body.getPaymentMethod()).map(PaymentMethod::name).orElse(null));
-                    transactionRepository.update(transaction.getId(), paymentId, paymentId, purchaseContext.now(clockProvider),
-                        transaction.getPlatformFee(), transaction.getGatewayFee(), transaction.getStatus(), transactionMetadata);
-                    return status.equals(STATUS_FAILED) ? PaymentWebhookResult.failed(STATUS_FAILED) : PaymentWebhookResult.cancelled();
-                case "canceled":
-                    transactionRepository.update(transaction.getId(), paymentId, paymentId, purchaseContext.now(clockProvider),
-                        0L, 0L, Transaction.Status.CANCELLED, transaction.getMetadata());
-                    return PaymentWebhookResult.cancelled();
-                case "open":
-                    return PaymentWebhookResult.redirect(body.getCheckoutLink());
-                default:
-                    return PaymentWebhookResult.notRelevant(status);
-            }
+            var ctx = new MollieWebhookContext(
+                status,
+                transaction,
+                paymentId,
+                purchaseContext,
+                body,
+                transactionMetadata
+            );
+
+            return statusHandlers
+                .getOrDefault(status, this::handleUnknown)
+                .handle(ctx);
+
         }
     }
 

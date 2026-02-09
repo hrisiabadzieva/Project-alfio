@@ -59,6 +59,7 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.flywaydb.core.Flyway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -124,7 +125,8 @@ public class EventManager {
     private final ClockProvider clockProvider;
     private final SubscriptionRepository subscriptionRepository;
     private final AdditionalServiceManager additionalServiceManager;
-
+    @Autowired
+    private final EventTimeZoneResolver eventTimeZoneResolver;
 
     public Event getSingleEvent(String eventName, String username) {
         return getOptionalByName(eventName, username).orElseThrow(IllegalStateException::new);
@@ -293,11 +295,12 @@ public class EventManager {
             Validate.isTrue(original.getAllowedPaymentProxies().stream().allMatch(p -> p != PaymentProxy.ON_SITE), ERROR_ONLINE_ON_SITE_NOT_COMPATIBLE);
         }
 
-        String timeZone = ObjectUtils.firstNonNull(em.getZoneId(), em.getGeolocation() != null ? em.getGeolocation().timeZone() : null);
+        ZoneId zoneId = eventTimeZoneResolver.resolveZoneId(em);
+        String timeZone = zoneId.getId();
+
         String latitude = ObjectUtils.firstNonNull(em.getLatitude(), em.getGeolocation() != null ? em.getGeolocation().latitude() : null);
         String longitude = ObjectUtils.firstNonNull(em.getLongitude(), em.getGeolocation() != null ?  em.getGeolocation().longitude(): null);
 
-        final ZoneId zoneId = ZoneId.of(timeZone);
         final ZonedDateTime begin = em.getBegin().toZonedDateTime(zoneId);
         final ZonedDateTime end = em.getEnd().toZonedDateTime(zoneId);
         eventRepository.updateHeader(eventId, em.getDisplayName(), em.getWebsiteUrl(), em.getExternalUrl(), em.getTermsAndConditionsUrl(),

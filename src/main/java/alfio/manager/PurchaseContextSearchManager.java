@@ -76,7 +76,7 @@ public class PurchaseContextSearchManager {
             return Pair.of(reservationsForEvent, ticketSearchRepository.countConfirmedPaymentsForEvent(event.getId(), toSearch, toFilter, SUPPORTED_PAYMENT_METHODS));
         } else {
             // functionality is not yet available for subscriptions
-            throw new UnsupportedOperationException("not implemented");
+            return Pair.of(List.of(), 0);
         }
     }
 
@@ -89,7 +89,7 @@ public class PurchaseContextSearchManager {
             return ticketSearchRepository.findAllEventPaymentsForExport(event.getId(), toSearch, toFilter, SUPPORTED_PAYMENT_METHODS);
         } else {
             // functionality is not yet available for subscriptions
-            throw new UnsupportedOperationException("not implemented");
+            return List.of();
         }
     }
 }

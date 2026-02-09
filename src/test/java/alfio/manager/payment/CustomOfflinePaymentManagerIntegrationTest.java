@@ -76,6 +76,8 @@ class CustomOfflinePaymentManagerIntegrationTest {
     private EventRepository eventRepository;
     @Autowired
     private CustomOfflineConfigurationManager customOfflineConfigurationManager;
+    @Autowired
+    private OfflinePaymentDeadlineResolver deadlineResolver;
 
     private Principal mockPrincipal;
     private Organization organization;
@@ -147,7 +149,8 @@ class CustomOfflinePaymentManagerIntegrationTest {
             ticketReservationRepository,
             transactionRepository,
             eventRepository,
-            customOfflineConfigurationManager
+            customOfflineConfigurationManager,
+            deadlineResolver
         );
 
         var event = Mockito.mock(Event.class);
@@ -183,7 +186,8 @@ class CustomOfflinePaymentManagerIntegrationTest {
             ticketReservationRepository,
             transactionRepository,
             eventRepository,
-            customOfflineConfigurationManager
+            customOfflineConfigurationManager,
+            deadlineResolver
         );
 
         var event = Mockito.mock(Event.class);
@@ -207,13 +211,17 @@ class CustomOfflinePaymentManagerIntegrationTest {
             organization.getId()
         );
 
+        OfflinePaymentDeadlineResolver deadlineResolver = new EventEndOfflinePaymentDeadlineResolver();
+
         CustomOfflinePaymentManager paymentManager = new CustomOfflinePaymentManager(
             clockProvider(),
             ticketReservationRepository,
             transactionRepository,
             eventRepository,
-            customOfflineConfigurationManager
+            customOfflineConfigurationManager,
+            deadlineResolver
         );
+
 
         var event = Mockito.mock(Event.class);
         var configLevel = ConfigurationLevel.organization(organization.getId());

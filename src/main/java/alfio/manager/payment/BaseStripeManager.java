@@ -65,6 +65,7 @@ class BaseStripeManager {
     private final ConfigurationRepository configurationRepository;
     private final TicketRepository ticketRepository;
     private final Environment environment;
+    protected final StripeWebhookEventParser webhookEventParser;
 
     private final Map<Class<? extends StripeException>, StripeExceptionHandler> handlers = Map.of(
         CardException.class, this::handleCardException,
@@ -110,7 +111,7 @@ class BaseStripeManager {
 
     Optional<Boolean> processWebhookEvent(String body, String signature) {
         try {
-            com.stripe.model.Event event = Webhook.constructEvent(body, signature, getWebhookSignatureKey());
+            StripeWebhookEvent event = webhookEventParser.parseAndVerify(body, signature, getWebhookSignatureKey());
             if("account.application.deauthorized".equals(event.getType())
                 && Boolean.TRUE.equals(event.getLivemode()) == environment.acceptsProfiles(Profiles.of("dev", "test", "demo"))) {
                 return Optional.of(revokeToken(event.getAccount()));

@@ -56,6 +56,7 @@ public class StripeManagerTest {
     private CustomerName customerName;
 
     private final String paymentId = "customer#1";
+    private final StripeWebhookEventParser webhookEventParser = new StripeSdkWebhookEventParser();
 
     @BeforeEach
     public void setUp() {
@@ -72,7 +73,7 @@ public class StripeManagerTest {
 
     @Test
     public void successFlow() {
-        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class)) {
+        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class), webhookEventParser) {
             @Override
             protected Optional<Charge> charge(PaymentSpecification spec, Map<String, Object> chargeParams ) {
                 return Optional.of( new Charge() {{
@@ -89,7 +90,7 @@ public class StripeManagerTest {
 
     @Test
     void stripeError() {
-        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class)) {
+        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class), webhookEventParser) {
             @Override
             protected Optional<Charge> charge(PaymentSpecification spec, Map<String, Object> chargeParams ) throws StripeException {
                 throw new AuthenticationException("401", "42", "401", 401);
@@ -103,7 +104,7 @@ public class StripeManagerTest {
 
     @Test
     public void internalError() {
-        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class)) {
+        BaseStripeManager baseStripeManager = new BaseStripeManager(configurationManager, configurationRepository, ticketRepository, mock(Environment.class), webhookEventParser) {
             @Override
             protected Optional<Charge> charge(PaymentSpecification spec, Map<String, Object> chargeParams) {
                 return Optional.of( new Charge() {{
